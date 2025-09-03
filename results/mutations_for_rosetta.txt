@@ -1,20 +1,55 @@
-A 36 D E
-A 36 D N
-A 36 D Q
-A 36 D S
-A 36 D W
-A 38 G E
-A 31 K A
-A 31 K Q
-A 31 K R
-A 37 N D
-A 37 N F
-A 37 N I
-A 37 N L
-A 37 N V
-A 37 N W
-A 32 Q P
-A 33 Y D
-A 33 Y I
-A 33 Y L
-A 33 Y Q
+total 27
+1
+F 30 M
+1
+F 30 Y
+1
+K 31 P
+1
+K 31 Q
+1
+K 31 R
+1
+Q 32 P
+1
+Y 33 D
+1
+Y 33 W
+1
+A 34 P
+1
+D 36 G
+1
+D 36 R
+1
+N 37 D
+1
+N 37 F
+1
+N 37 H
+1
+N 37 I
+1
+N 37 L
+1
+N 37 M
+1
+N 37 P
+1
+N 37 Q
+1
+N 37 R
+1
+N 37 V
+1
+N 37 W
+1
+N 37 Y
+1
+G 38 A
+1
+G 38 I
+1
+G 38 R
+1
+G 38 V

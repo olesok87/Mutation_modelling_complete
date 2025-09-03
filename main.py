@@ -206,9 +206,10 @@ def csv_to_mcsm(input_file):
     return output_file
 
 def transform_and_calculate_ddg():
-    """Transforms mCSM and MAESTRO outputs and calculates average ΔΔG."""
+    """Transforms mCSM, MAESTRO, and ThermoMPNN outputs and calculates average ΔΔG."""
     mcsm_input_path = os.path.join(MCSM_DIR, "mCSM_results.txt")
     maestro_input_path = os.path.join(MAESTRO_DIR, "MAESTRO_results.csv")
+    thermompnn_input_path = os.path.join(RESULTS_DIR, "thermoMPNN output", "thermoMPNN_results.csv")
     transform_output_path = os.path.join(MCSM_DIR, "mCSM_results_transformed.csv")
     output_average_path = os.path.join(AVERAGE_DIR, "average.csv")
 
@@ -218,52 +219,41 @@ def transform_and_calculate_ddg():
     if not os.path.exists(maestro_input_path):
         print(f"⚠️ MAESTRO results file not found: {maestro_input_path}. Skipping DDG calculation.")
         return None
+    if not os.path.exists(thermompnn_input_path):
+        print(f"⚠️ ThermoMPNN results file not found: {thermompnn_input_path}. Skipping DDG calculation.")
+        return None
 
     try:
-        # transform txt. output to CSV
-        # Load the tab-delimited txt file
+        # mCSM
         df_mcsm = pd.read_csv(mcsm_input_path, sep="\t")
-
-        # Normalize headers
         df_mcsm.columns = df_mcsm.columns.str.strip().str.upper()
-
-        # Build mutation in file2 style: WILD_RES + RES_POS + "." + CHAIN + "{" + MUT_RES + "}"
         df_mcsm["MUTATION"] = df_mcsm["WILD_RES"] + df_mcsm["RES_POS"].astype(str) + "." + df_mcsm["CHAIN"] + "{" + df_mcsm["MUT_RES"] + "}"
-
-        # Keep only mutation and ΔΔG
         df_mcsm_transformed = df_mcsm[["MUTATION", "PRED_DDG"]].rename(columns={"PRED_DDG": "DeltaG_tool1"})
-
-        # Save as CSV
         df_mcsm_transformed.to_csv(transform_output_path, index=False)
-
         print("✅ mCSM file transformation done. Saved as file: " + transform_output_path)
 
-        # calculate average ddG
-        # Load transformed first file
+        # MAESTRO
         df1 = pd.read_csv(transform_output_path)
-
-        # Load second CSV (semicolon-delimited)
         df2 = pd.read_csv(maestro_input_path, sep=";")
-
-        # Strip whitespace from all column names
         df1.columns = df1.columns.str.strip()
         df2.columns = df2.columns.str.strip()
-
-        # Create MUTATION column in df2 (use the substitution column directly)
         df2["MUTATION"] = df2["substitution"]
-
-        # Rename ddG_pred to match df1
         df2 = df2.rename(columns={"ddG_pred": "DeltaG_tool2"})
 
-        # Merge on MUTATION
-        # Use 'outer' merge to keep all mutations from both files, fill missing with NaN
-        merged = pd.merge(df1, df2[["MUTATION", "DeltaG_tool2"]], on="MUTATION", how="outer")
+        # ThermoMPNN
+        df3 = pd.read_csv(thermompnn_input_path)
+        df3.columns = df3.columns.str.strip()
+        df3["MUTATION"] = df3.apply(lambda x: f"{x['wtAA']}{x['pos']}.A{{{x['mutAA']}}}", axis=1)
+        df3 = df3.rename(columns={"ddG (kcal/mol)": "DeltaG_tool3"})
+
+        # Merge all three, keeping only mutations present in all three files (inner join)
+        merged = pd.merge(df1, df2[["MUTATION", "DeltaG_tool2"]], on="MUTATION", how="inner")
+        merged = pd.merge(merged, df3[["MUTATION", "DeltaG_tool3"]], on="MUTATION", how="inner")
+
+        # Compute average ΔΔG, handling potential NaNs
+        merged["DeltaG_avg"] = merged[["DeltaG_tool1", "DeltaG_tool2", "DeltaG_tool3"]].mean(axis=1)
 
 
-        # Compute average ΔΔG, handling potential NaNs from outer merge
-        merged["DeltaG_avg"] = merged[["DeltaG_tool1", "DeltaG_tool2"]].mean(axis=1)
-
-        # Save final CSV
         merged.to_csv(output_average_path, index=False)
         print("✅ The total values and averages were saved as " + output_average_path)
         return output_average_path
@@ -271,7 +261,6 @@ def transform_and_calculate_ddg():
     except Exception as e:
         print(f"❌ Error during DDG calculation and merging: {e}")
         return None
-
 
 def plot_all(average_ddg_path):
     """Generates individual plots for each residue's predicted ΔΔG values."""
@@ -297,7 +286,7 @@ def plot_all(average_ddg_path):
 
     df_long = df.melt(
         id_vars=["MUTATION", "MUTATION_Clean", "Residue"], # Include original MUTATION and CleanMutation
-        value_vars=["DeltaG_tool1", "DeltaG_tool2"],
+        value_vars=["DeltaG_tool1", "DeltaG_tool2","DeltaG_tool3"],
         var_name="Method",
         value_name="ΔΔG"
     )
@@ -305,12 +294,13 @@ def plot_all(average_ddg_path):
     # Rename tools
     df_long["Method"] = df_long["Method"].replace({
         "DeltaG_tool1": "mCSM",
-        "DeltaG_tool2": "MAESTRO"
+        "DeltaG_tool2": "MAESTRO",
+        "DeltaG_tool3": "ThermoMPNN"
     })
 
     # Set Seaborn style for pastel colors + grid
     sns.set_theme(style="whitegrid")
-    palette = sns.color_palette("pastel", 2)
+    palette = sns.color_palette("pastel", 3)
 
     # Loop over residues and make one figure each
     for residue, subset in df_long.groupby("Residue"):
@@ -357,35 +347,59 @@ def plot_ddg_consensus(df, save_path):
     # Clean up mutation labels -> A34.A{C} → A34C
     df.loc[:, "CleanMutation"] = df["MUTATION"].apply(lambda x: re.sub(r"([A-Z]\d+)\..*?\{([A-Z])\}", r"\1\2", str(x))) # Handle potential NaN in MUTATION
 
-    # Rename tools
-    df = df.rename(columns={
-        "DeltaG_tool1": "mCSM",
-        "DeltaG_tool2": "MAESTRO"
-    })
-
-    # Agreement in sign - handle NaN values which means one tool didn't have a prediction
-    df["Sign_mCSM"] = df["mCSM"].apply(lambda x: "+" if pd.notna(x) and x > 0 else ("-" if pd.notna(x) and x < 0 else "0"))
-    df["Sign_MAESTRO"] = df["MAESTRO"].apply(lambda x: "+" if pd.notna(x) and x > 0 else ("-" if pd.notna(x) and x < 0 else "0"))
+    # Agreement in sign for all three tools
+    df["Sign_mCSM"] = df["DeltaG_tool1"].apply(
+        lambda x: "+" if pd.notna(x) and x > 0 else ("-" if pd.notna(x) and x < 0 else "0"))
+    df["Sign_MAESTRO"] = df["DeltaG_tool2"].apply(
+        lambda x: "+" if pd.notna(x) and x > 0 else ("-" if pd.notna(x) and x < 0 else "0"))
+    df["Sign_ThermoMPNN"] = df["DeltaG_tool3"].apply(
+        lambda x: "+" if pd.notna(x) and x > 0 else ("-" if pd.notna(x) and x < 0 else "0"))
 
 
-    # Keep only mutations where both tools agree AND both tools have a value (sign is not "0")
-    df_agree = df[(df["Sign_mCSM"] == df["Sign_MAESTRO"]) & (df["Sign_mCSM"] != "0")].copy()
 
+    # Keep only mutations where at least two tools agree in sign and both have a value (sign is not "0")
+    def consensus(row):
+        signs = [row["Sign_mCSM"], row["Sign_MAESTRO"], row["Sign_ThermoMPNN"]]
+        nonzero_signs = [s for s in signs if s != "0"]
+        return len(nonzero_signs) >= 2 and (nonzero_signs.count("+") >= 2 or nonzero_signs.count("-") >= 2)
 
-    # Further filter: at least one |ΔΔG| > 0.75
-    df_agree = df_agree[(df_agree["mCSM"].abs() > 0.75) | (df_agree["MAESTRO"].abs() > 0.75)]
+    df_agree = df[df.apply(consensus, axis=1)].copy()
+
+    # Further filter: at least two |ΔΔG| > 0.5
+    def same_sign_above_threshold(row, threshold=0.5):
+        vals = [
+            row["DeltaG_tool1"],
+            row["DeltaG_tool2"],
+            row["DeltaG_tool3"]
+        ]
+        # Only consider non-null values above threshold
+        filtered = [v for v in vals if pd.notna(v) and abs(v) > threshold]
+        if len(filtered) < 2:
+            return False
+        # Check if all have the same sign
+        signs = [v > 0 for v in filtered]
+        return all(signs) or not any(signs)
+
+    df_agree = df_agree[df_agree.apply(same_sign_above_threshold, axis=1)]
 
     if df_agree.empty:
         print("⚠️ No mutations satisfy the filtering criteria for consensus plot.")
         return df_agree
 
+
     # Melt for plotting
     df_long = df_agree.melt(
         id_vars=["CleanMutation", "Residue"],
-        value_vars=["mCSM", "MAESTRO"],
+        value_vars=["DeltaG_tool1", "DeltaG_tool2","DeltaG_tool3"],
         var_name="Method",
         value_name="ΔΔG"
     )
+
+    df_long["Method"] = df_long["Method"].replace({
+        "DeltaG_tool1": "mCSM",
+        "DeltaG_tool2": "MAESTRO",
+        "DeltaG_tool3": "ThermoMPNN"
+    })
 
     # Plot
     plt.figure(figsize=(12, 6))
@@ -394,7 +408,7 @@ def plot_ddg_consensus(df, save_path):
         x="CleanMutation",
         y="ΔΔG",
         hue="Method",
-        palette=["#8ecae6", "#ffb5a7"],  # pastel blue/pink
+        palette=["#8ecae6", "#ffb5a7", "#b5ead7"],  # pastel blue/pink/green # pastel blue/pink
         edgecolor="black"
     )
     plt.xticks(rotation=60, ha="right") # Added ha="right" for better label alignment
@@ -411,35 +425,39 @@ def plot_ddg_consensus(df, save_path):
     return df_agree
 
 def write_rosetta_mut_file(df_agree, pdb_chain, output_path=None):
-    """Writes a mutation list in Rosetta format."""
-    def to_rosetta_line(mut_str, pdb_chain):
+    """Writes a mutation list in Rosetta format with header info."""
+    def to_rosetta_line(mut_str):
         match = re.match(r"([A-Z])(\d+)([A-Z])", mut_str)
         if match:
             wt, pos, mut = match.groups()
-            return f"{pdb_chain} {pos} {wt} {mut}"
+            return f"{wt} {pos} {mut}"
         return None
 
     if df_agree.empty:
         print("⚠️ Input DataFrame for Rosetta file is empty.")
         return None
 
-    # Use 'CleanMutation' column which is already in the desired format
-    mutation_lines = df_agree["CleanMutation"].apply(lambda x: to_rosetta_line(x, pdb_chain)).dropna().tolist()
+    # Warn about chain info loss
+    print("⚠️ Chain information will be lost in the Rosetta mutation file. If your PDB contains more than one chain, split resulting rosetta file into separate files.Press to continue")
+
+    mutation_lines = df_agree["CleanMutation"].apply(to_rosetta_line).dropna().tolist()
 
     if not mutation_lines:
-         print("⚠️ No valid mutations found to write to Rosetta file.")
-         return None
-
+        print("⚠️ No valid mutations found to write to Rosetta file.")
+        return None
 
     if output_path is None:
         output_path = os.path.join(RESULTS_DIR, "mutations_for_rosetta.txt")
 
     with open(output_path, "w") as f:
-        for line in mutation_lines:
-            f.write(line + "\n")
+         f.write(f"total {len(mutation_lines)}\n")
+         for line in mutation_lines:
+             f.write("1\n")
+             f.write(line + "\n")
 
     print(f"✅ Mutation file saved: {output_path}")
     return output_path
+
 
 # --- Main execution flow ---
 if __name__ == "__main__": # Added if __name__ == "__main__": guard
@@ -478,6 +496,7 @@ if __name__ == "__main__": # Added if __name__ == "__main__": guard
         print("Download the results and save them as:")
         print(f"- MAESTRO results: {os.path.join(MAESTRO_DIR, 'MAESTRO_results.csv')}")
         print(f"- mCSM results: {os.path.join(MCSM_DIR, 'mCSM_results.txt')}")
+        print(f"- ThermoMPNN results: {os.path.join(MCSM_DIR, 'ThermoMPNN_results.csv')}")
         input("\nOnce the results are saved, please press enter to continue ...")
     else:
         print("❌ Mutation list generation failed. Skipping format conversion and subsequent steps.")
