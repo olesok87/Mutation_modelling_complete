@@ -6,6 +6,15 @@ Based on these requirements, I selected:
 - MAESTRO https://pbwww.services.came.sbg.ac.at/maestro/web
 - mCSM https://biosig.lab.uq.edu.au/mcsm/ (later upgraded by SDM in DUET)
 - PoPMuSiC (problem with licence atm so not included)
+- ThermoMPNN
+
+The flow is as follows:
+- input pdb and region_select files (using pymol or just inputting entire sequence 1aa-end aa)
+- generate all possible mutations for the selected region (20 possibilities per residue) which` will give you the files to upload to mCSM and MAESTRO
+- generate csv file on google colab ThermoMPNN (make sure resulting output has correct numbering -fix with AI agent if something went wrong in colab)
+- parse all 3 outputs and generate graphs and a mutation list for Rosetta ddG
+- run Rosetta ddG on the selected mutations
+- include Rosetta ddG in the final csv and graph (multiply by 2.94 to convert to kcal/mol)
 
 Please follow the licence agreement for each software (the data is generated via the web servers)
 
