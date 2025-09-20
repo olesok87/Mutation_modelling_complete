@@ -473,7 +473,7 @@ def add_rosetta_ddg_to_average(rosetta_output_dir, average_csv_path):
         print(f"❌ ddg_predictions.out not found in {rosetta_output_dir}")
         return None
 
-    # Parse ddg_predictions.out
+    # Parse ddg_predictions.out and use scaling factor
     rosetta_ddg = {}
     with open(rosetta_file, "r") as f:
         for line in f:
@@ -486,7 +486,7 @@ def add_rosetta_ddg_to_average(rosetta_output_dir, average_csv_path):
                     wt, pos, mut = match.groups()
                     mutation_key = f"{wt}{pos}.A{{{mut}}}"
                     try:
-                        rosetta_ddg[mutation_key] = float(ddg_total) * 2.94
+                        rosetta_ddg[mutation_key] = float(ddg_total) / 2.94
                     except ValueError:
                         continue
 
@@ -581,14 +581,14 @@ def plot_all_with_rosetta(average_with_rosetta_path):
     plt.tight_layout()
 
     # Set axis limits
-    plt.ylim(-10, 10)
+    plt.ylim(-5, 5)
 
     # Annotate values above bars if outside axis limits
     for i, bar in enumerate(ax.patches):
         height = bar.get_height()
-        if height > 10 or height < -10:
+        if height > 5 or height < -5:
             x = bar.get_x() + bar.get_width() / 2
-            y = 10 if height > 10 else -10
+            y = 5 if height > 5 else -5
             ax.annotate(f"{height:.2f}", (x, y), ha='center', va='bottom' if height > 0 else 'top', fontsize=8, color='black', rotation=0)
 
     save_path = os.path.join(AVERAGE_DIR, "Final_ddG_with_rosetta.png")
